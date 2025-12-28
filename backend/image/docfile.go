@@ -59,8 +59,8 @@ func secretstaker(client kubernetes.Interface, name string) *v1.Secret {
 
 }
 
-func jobrunner(client kubernetes.Interface, object *batchv1.Job, giturl string, appName string) (*batchv1.Job, error) {
-	result, err := client.BatchV1().Jobs("builder").Create(context.Background(), jobobject(giturl, appName), metav1.CreateOptions{})
+func jobrunner(client kubernetes.Interface, giturl string, appName string) (*batchv1.Job, error) {
+	result, err := client.BatchV1().Jobs("builder").Create(context.Background(), JobObject(giturl, appName), metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,17 @@ func jobrunner(client kubernetes.Interface, object *batchv1.Job, giturl string, 
 
 }
 
-func jobobject(giturl string, appName string) *batchv1.Job {
+func JobObject(giturl string, appName string) *batchv1.Job {
+
+	cnbCmd := fmt.Sprintf(
+		`export CNB_REGISTRY_AUTH="{\"index.docker.io\":{\"username\":\"oauth2accesstoken\",\"password\":\"$REGISTRY_TOKEN\"}}" && \
+    /cnb/lifecycle/creator \
+    -app=/workspace \
+    -image=%s \
+    -skip-restore=false`,
+		appName, // This injects the appName as the image tag
+	)
+
 	var payload = fmt.Sprintf(
 		`{"status":"ready","app":"%s","timestamp":%d}`,
 		appName,
@@ -99,7 +109,7 @@ func jobobject(giturl string, appName string) *batchv1.Job {
 						{
 							Name:    "pullrepo",
 							Image:   "alpine/git",
-							Command: []string{"sh", "-c", "git clone " + giturl},
+							Command: []string{"sh", "-c", "git clone " + giturl + "/workspace"},
 							VolumeMounts: []v1.VolumeMount{
 								{
 									Name:      "workspace",
@@ -110,7 +120,7 @@ func jobobject(giturl string, appName string) *batchv1.Job {
 						{
 							Name:    "cnd_binary",
 							Image:   "paketobuildpacks/builder-jammy-base:latest",
-							Command: []string{"sh", "-c"},
+							Command: []string{"sh", "-c", cnbCmd},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "workspace",

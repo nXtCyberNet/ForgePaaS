@@ -30,6 +30,7 @@ func takedata(value string) string {
 }
 
 func CreateDep(image_url string, depid string) *appv1.Deployment {
+	label := map[string]string{"app": depid}
 	dep := &appv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      depid,
@@ -38,11 +39,12 @@ func CreateDep(image_url string, depid string) *appv1.Deployment {
 		Spec: appv1.DeploymentSpec{
 			Replicas: int32Ptr(2),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": depid},
+				MatchLabels: label,
 			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: depid,
+					Name:   depid,
+					Labels: label,
 				},
 				Spec: v1.PodSpec{
 					Containers: []corev1.Container{
@@ -69,12 +71,6 @@ func main() {
 	if err != nil {
 		log.Println(err)
 	}
-
-	result, err := client.BatchV1().Jobs("builder").Create(context.Background(), image.jobobject(), metav1.CreateOptions{})
-	if err != nil {
-		log.Println("")
-	}
-	log.Printf("job created info %s", &result.ObjectMeta)
 
 	dep := CreateDep("bro ", "depid")
 

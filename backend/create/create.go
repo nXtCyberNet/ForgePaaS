@@ -2,13 +2,10 @@ package create
 
 import (
 	"context"
-	"log"
-	"minihiroku/backend/image"
-	"os"
-
-	"github.com/joho/godotenv"
 
 	appv1 "k8s.io/api/apps/v1" // For Metadata (Names)
+	"k8s.io/client-go/kubernetes"
+
 	// For the Job itself
 	corev1 "k8s.io/api/core/v1" // For the Pod/Container inside the Job
 	v1 "k8s.io/api/core/v1"
@@ -17,16 +14,6 @@ import (
 
 func int32Ptr(i int32) *int32 {
 	return &i
-}
-
-func takedata(value string) string {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatal("Error loading .env file")
-
-	}
-	a := os.Getenv(value)
-	return a
 }
 
 func CreateDep(image_url string, depid string) *appv1.Deployment {
@@ -65,19 +52,12 @@ func CreateDep(image_url string, depid string) *appv1.Deployment {
 	return dep
 }
 
-func main() {
-	var kubeconfigPath string
-	client, err := image.CreateClient(takedata(kubeconfigPath))
-	if err != nil {
-		log.Println(err)
-	}
-
-	dep := CreateDep("bro ", "depid")
+func DeplomentRunner(client kubernetes.Interface, dep *appv1.Deployment) (*appv1.Deployment, error) {
 
 	create, err := client.AppsV1().Deployments("runner").Create(context.Background(), dep, metav1.CreateOptions{})
 	if err != nil {
-		log.Println(err)
+		return nil, err
 	}
-	log.Println(create)
+	return create, nil
 
 }

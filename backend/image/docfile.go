@@ -59,8 +59,8 @@ func secretstaker(client kubernetes.Interface, name string) *v1.Secret {
 
 }
 
-func jobrunner(client kubernetes.Interface, giturl string, appName string) (*batchv1.Job, error) {
-	result, err := client.BatchV1().Jobs("builder").Create(context.Background(), JobObject(giturl, appName), metav1.CreateOptions{})
+func JobRunner(client kubernetes.Interface, job *batchv1.Job) (*batchv1.Job, error) {
+	result, err := client.BatchV1().Jobs("builder").Create(context.Background(), job, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -68,15 +68,15 @@ func jobrunner(client kubernetes.Interface, giturl string, appName string) (*bat
 
 }
 
-func JobObject(giturl string, appName string) *batchv1.Job {
+func JobObject(giturl string, appName string, depid string) (*batchv1.Job, string) {
+	apptag := appName + depid
 
 	cnbCmd := fmt.Sprintf(
-		`export CNB_REGISTRY_AUTH="{\"index.docker.io\":{\"username\":\"oauth2accesstoken\",\"password\":\"$REGISTRY_TOKEN\"}}" && \
-    /cnb/lifecycle/creator \
+		`/cnb/lifecycle/creator \
     -app=/workspace \
     -image=%s \
     -skip-restore=false`,
-		appName, // This injects the appName as the image tag
+		apptag,
 	)
 
 	var payload = fmt.Sprintf(
@@ -109,7 +109,7 @@ func JobObject(giturl string, appName string) *batchv1.Job {
 						{
 							Name:    "pullrepo",
 							Image:   "alpine/git",
-							Command: []string{"sh", "-c", "git clone " + giturl + "/workspace"},
+							Command: []string{"sh", "-c", "git clone " + giturl + " /workspace"},
 							VolumeMounts: []v1.VolumeMount{
 								{
 									Name:      "workspace",
@@ -118,7 +118,7 @@ func JobObject(giturl string, appName string) *batchv1.Job {
 							},
 						},
 						{
-							Name:    "cnd_binary",
+							Name:    "cnd-binary",
 							Image:   "paketobuildpacks/builder-jammy-base:latest",
 							Command: []string{"sh", "-c", cnbCmd},
 							VolumeMounts: []corev1.VolumeMount{
@@ -129,11 +129,12 @@ func JobObject(giturl string, appName string) *batchv1.Job {
 							},
 						},
 					},
-					Containers: []v1.Container{
+					Containers: []corev1.Container{
 						{
 							Name:    "notifier",
 							Image:   "redis:alpine",
-							Command: []string{"redis-cli", "-h", "redis-service", "SET", fmt.Sprintf("status:%s", appName), payload},
+							Command: []string{"redis-cli", "-h", "redis-service", "RPUSH", fmt.Sprintf("status:%s", appName), payload},
+
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "workspace",
@@ -146,5 +147,5 @@ func JobObject(giturl string, appName string) *batchv1.Job {
 			},
 		},
 	}
-	return job
+	return job, apptag
 }

@@ -2,7 +2,8 @@ package models
 
 type Create struct {
 	GitRepo string `json:"gitrepo"`
-	UserId  string `json:"userid"`
+	DepId   string `json:"DepId"`
+	AppName string `json:"appName"`
 }
 
 type Delete struct {

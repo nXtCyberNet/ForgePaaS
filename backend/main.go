@@ -28,21 +28,23 @@ func main() {
 		log.Println("env not loaded ")
 	}
 
+	client, err := image.CreateClient(os.Getenv("kubeconfigPath"))
+	if err != nil {
+		log.Println("k8s not connected ")
+	}
+
 	consumer, err := rediss.StartConsumer(rds)
 	if err != nil {
 		log.Println(err)
 	}
 	log.Printf(" finded the payload appname : %s , depid %s , gitrepo : %s", consumer.AppName, consumer.DepId, consumer.GitRepo)
 
-	client, err := image.CreateClient(os.Getenv("kubeconfigPath"))
-	if err != nil {
-		log.Println("k8s not connected ")
-	}
 	log.Println("k8s connected")
 	log.Println(client)
 
-	job, apptag := image.JobObject(consumer.GitRepo, consumer.AppName, consumer.DepId)
+	job, apptag := image.JobObject(consumer.GitRepo, consumer.AppName, consumer.DepId, os.Getenv("REGISTORY_URL"))
 	log.Println("job created ")
+	log.Println(apptag)
 
 	runnn, err := image.JobRunner(client, job)
 	if err != nil {
@@ -50,6 +52,8 @@ func main() {
 	}
 
 	log.Println("jo info ", runnn.Name, runnn.Namespace, runnn.CreationTimestamp, runnn.UID)
+
+	err = image.LogsGiver(client, apptag, "builder")
 
 	check, err := rediss.CheckReady(rds)
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"minihiroku/backend/create"
 	"minihiroku/backend/image"
@@ -12,12 +13,6 @@ import (
 
 func LoadEnv() error {
 	return godotenv.Load("backend/.env")
-}
-
-func image_url(apptag string) string {
-	registry_url := os.Getenv("REGISTORY_URL")
-	return registry_url + apptag
-
 }
 
 func main() {
@@ -55,13 +50,18 @@ func main() {
 
 	err = image.LogsGiver(client, apptag, "builder")
 
-	check, err := rediss.CheckReady(rds)
+	check, err := rediss.CheckReady(rds, consumer.AppName)
 	if err != nil {
 		log.Println(err)
 	}
+	var msg map[string]interface{}
+	json.Unmarshal([]byte(check[1]), &msg)
 	log.Println("got the image ready signal  ")
-	if check[0] == "ready" {
-		dep := create.CreateDep(image_url(apptag), consumer.DepId)
+	log.Println(check)
+	apptag = os.Getenv("REGISTORY_CLUSTER_IP") + "/" + apptag
+
+	if msg["status"] == "ready" {
+		dep := create.CreateDep(apptag, consumer.DepId)
 		runn, err := create.DeplomentRunner(client, dep)
 		if err != nil {
 			log.Println(err)

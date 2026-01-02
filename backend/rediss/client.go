@@ -26,8 +26,9 @@ func test(rdb *redis.Client) bool {
 
 }
 
-func CheckReady(rdb *redis.Client) ([]string, error) {
-	msg, err := rdb.BRPop(context.Background(), 0, "buildqueue ").Result()
+func CheckReady(rdb *redis.Client, appname string) ([]string, error) {
+	queue := fmt.Sprintf("status:%s", appname)
+	msg, err := rdb.BRPop(context.Background(), 0, queue).Result()
 	if err != nil {
 		return nil, err
 	}

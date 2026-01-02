@@ -1,0 +1,28 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: private-ca
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: registry-cert
+  namespace: default
+spec:
+  secretName: registry-tls
+  issuerRef:
+    name: private-ca
+    kind: ClusterIssuer
+  spec:
+  dnsNames:
+    - registry
+    - registry.default
+    - registry.default.svc
+    - registry.default.svc.cluster.local
+    - registry-service
+    - registry-service.default
+    - registry-service.default.svc
+    - registry-service.default.svc.cluster.local
+---

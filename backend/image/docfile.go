@@ -13,7 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // For Metadata (Names)
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -73,7 +73,6 @@ func JobRunner(client kubernetes.Interface, job *batchv1.Job) (*batchv1.Job, err
 func LogsGiver(client kubernetes.Interface, jobname string, namespace string) error {
 	ctx := context.Background()
 
-	// 1. Wait for the Pod to be created and scheduled
 	var podName string
 	fmt.Printf("Waiting for pod creation for job: %s...\n", jobname)
 
@@ -86,9 +85,9 @@ func LogsGiver(client kubernetes.Interface, jobname string, namespace string) er
 		}
 
 		if len(pods.Items) > 0 {
-			// Pick the most recent one if there are multiple (due to retries)
+
 			pod := pods.Items[0]
-			// We wait until phase is NOT Pending so we have a node assigned
+
 			if pod.Status.Phase != corev1.PodPending {
 				podName = pod.Name
 				break
@@ -99,14 +98,11 @@ func LogsGiver(client kubernetes.Interface, jobname string, namespace string) er
 
 	fmt.Printf("Found Pod: %s. Starting log stream...\n", podName)
 
-	// 2. Define the sequence of containers to stream
 	containers := []string{"pullrepo", "cnd-binary", "notifier"}
 
 	for _, containerName := range containers {
 		fmt.Printf("\n--- [Logs: %s] ---\n", containerName)
 
-		// 3. WAIT LOOP: Wait for this specific container to start
-		// If we stream too early, K8s returns an error.
 		for {
 			pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 			if err != nil {
@@ -179,17 +175,19 @@ func LogsGiver(client kubernetes.Interface, jobname string, namespace string) er
 
 func JobObject(giturl string, appName string, depid string, registry_url string) (*batchv1.Job, string) {
 	apptag := fmt.Sprintf("%s/%s:%s", registry_url, appName, depid)
+	image := fmt.Sprintf("%s:%s", appName, depid)
 	cacheTag := fmt.Sprintf("%s/%s:cache", registry_url, appName)
-	// runImage := fmt.Sprintf("%s/run-jammy-base:latest", registry_url)
+	runImage := "paketobuildpacks/run-jammy-base:latest"
 
 	cnbCmd := fmt.Sprintf(
 		"/cnb/lifecycle/creator "+
 			"-app=/workspace "+
 			"-cache-image=%s "+
+			"-run-image=%s "+
 			"-skip-restore=false "+
-			"%s "+ // <--- The apptag goes here as a positional arg
-			"2>&1", // <--- Redirect errors to stdout so you see them
-		cacheTag, apptag,
+			"%s "+
+			"2>&1",
+		cacheTag, runImage, apptag,
 	)
 
 	log.Println(cnbCmd)
@@ -201,7 +199,7 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "build-" + appName,
+			Name:      "build-" + appName + depid,
 			Namespace: "builder",
 		},
 		Spec: batchv1.JobSpec{
@@ -236,8 +234,10 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 							Name:            "cnd-binary",
 							Image:           "paketobuildpacks/builder-jammy-base:latest",
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Env:             []corev1.EnvVar{{Name: "CNB_PLATFORM_API", Value: "0.11"}},
-							Command:         []string{"/bin/sh", "-c", cnbCmd},
+							Env: []corev1.EnvVar{
+								{Name: "CNB_PLATFORM_API", Value: "0.11"},
+							},
+							Command: []string{"/bin/sh", "-c", cnbCmd},
 
 							VolumeMounts: []corev1.VolumeMount{
 								{
@@ -251,7 +251,7 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 						{
 							Name:    "notifier",
 							Image:   "redis:alpine",
-							Command: []string{"redis-cli", "-h", "redis-service", "RPUSH", fmt.Sprintf("status:%s", appName), payload},
+							Command: []string{"redis-cli", "-h", "redis.default.svc.cluster.local", "RPUSH", fmt.Sprintf("status:%s", appName), payload},
 
 							VolumeMounts: []corev1.VolumeMount{
 								{
@@ -265,5 +265,5 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 			},
 		},
 	}
-	return job, apptag
+	return job, image
 }

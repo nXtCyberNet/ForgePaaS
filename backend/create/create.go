@@ -36,7 +36,7 @@ func CreateDep(image_url string, depid string) *appv1.Deployment {
 				Spec: v1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  " ",
+							Name:  "dep",
 							Image: image_url,
 							Ports: []corev1.ContainerPort{
 								{
@@ -54,10 +54,29 @@ func CreateDep(image_url string, depid string) *appv1.Deployment {
 
 func DeplomentRunner(client kubernetes.Interface, dep *appv1.Deployment) (*appv1.Deployment, error) {
 
-	create, err := client.AppsV1().Deployments("runner").Create(context.Background(), dep, metav1.CreateOptions{})
+	create, err := client.AppsV1().Deployments("runners").Create(context.Background(), dep, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
 	return create, nil
+
+}
+
+func DeleteDeployment(client kubernetes.Interface, namespace string, name string) error {
+	grace := int64(30)
+	err := client.AppsV1().
+		Deployments(namespace).
+		Delete(
+			context.Background(),
+			name,
+			metav1.DeleteOptions{
+				GracePeriodSeconds: &grace,
+			},
+		)
+
+	if err != nil {
+		return err
+	}
+	return nil
 
 }

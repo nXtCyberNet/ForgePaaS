@@ -1,0 +1,97 @@
+# -------------------
+# 1. ConfigMap: The NGINX Configuration
+# -------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-proxy-config
+  namespace: default
+data:
+  nginx.conf: |
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      # 1. Disable File Size Limit (Crucial for Docker Pushes)
+      client_max_body_size 0;
+
+      upstream registry-backend {
+        # Points to your internal Registry Service
+        server registry-service.default.svc.cluster.local:5000;
+      }
+
+      server {
+        listen 5000;
+
+        location / {
+          proxy_pass http://registry-backend;
+          
+          # 2. Pass Headers correctly
+          proxy_set_header  Host              $http_host;   # required for docker client checks
+          proxy_set_header  X-Real-IP         $remote_addr; # pass real ip
+          proxy_set_header  X-Forwarded-For   $proxy_add_x_forwarded_for;
+          proxy_set_header  X-Forwarded-Proto $scheme;
+
+          # 3. Increase Timeouts (For slow internet / big layers)
+          proxy_connect_timeout 900;
+          proxy_send_timeout 900;
+          proxy_read_timeout 900;
+          send_timeout 900;
+        }
+      }
+    }
+
+---
+# -------------------
+# 2. Deployment: The NGINX Pod
+# -------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-proxy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry-proxy
+  template:
+    metadata:
+      labels:
+        app: registry-proxy
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: config-volume
+        configMap:
+          name: registry-proxy-config
+
+---
+# -------------------
+# 3. Service: Expose to Host
+# -------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-proxy-service
+  namespace: default
+spec:
+  selector:
+    app: registry-proxy
+  ports:
+    - protocol: TCP
+      port: 5000       # Port accessible inside cluster
+      targetPort: 5000 # Port on the NGINX container
+      nodePort: 30500  # (Optional) Static port if using NodePort
+  # Use LoadBalancer if on Docker Desktop/Cloud. 
+  # Use NodePort if on Minikube (and use `minikube service` to access).
+  type: LoadBalancer

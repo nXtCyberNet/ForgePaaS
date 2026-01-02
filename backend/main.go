@@ -7,6 +7,7 @@ import (
 	"minihiroku/backend/image"
 	"minihiroku/backend/rediss"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -26,6 +27,10 @@ func main() {
 	client, err := image.CreateClient(os.Getenv("kubeconfigPath"))
 	if err != nil {
 		log.Println("k8s not connected ")
+	}
+	dynclient, err := image.NewDynamicClient(os.Getenv("kubeconfigPath"))
+	if err != nil {
+		log.Println(err)
 	}
 
 	consumer, err := rediss.StartConsumer(rds)
@@ -63,9 +68,23 @@ func main() {
 	if msg["status"] == "ready" {
 		dep := create.CreateDep(apptag, consumer.DepId)
 		runn, err := create.DeplomentRunner(client, dep)
+
 		if err != nil {
 			log.Println(err)
 		}
+		errr := create.CreateService(client, runn.Namespace, consumer.AppName)
+
+		if err != nil {
+			log.Println(errr)
+		}
+		log.Println("service created ")
+		time.Sleep(20 * time.Second)
+		rout := create.CreateRoute(dynclient, consumer.AppName, os.Getenv("DOMAIN"), runn.Namespace)
+		if rout != nil {
+			log.Println(rout)
+		}
+		log.Println("route created ")
+
 		log.Println("deployment info ", runn.Name, runn.Namespace, runn.UID)
 
 	}

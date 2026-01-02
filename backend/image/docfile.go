@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -49,6 +50,21 @@ func CreateClient(kubeconfigPath string) (kubernetes.Interface, error) {
 
 	return client, nil
 
+}
+
+func NewDynamicClient(kubeconfigPath string) (dynamic.Interface, error) {
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	dynClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return dynClient, nil
 }
 
 func secretstaker(client kubernetes.Interface, name string) *v1.Secret {

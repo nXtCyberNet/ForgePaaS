@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"minihiroku/backend/models"
 
 	"github.com/redis/go-redis/v9"
@@ -36,7 +37,7 @@ func CheckReady(rdb *redis.Client, appname string) ([]string, error) {
 
 }
 
-func StartConsumer(rdb *redis.Client) (*models.Create, error) {
+func StartConsumer(ctx context.Context, rdb *redis.Client) (*models.Create, error) {
 	if test(rdb) != true {
 		fmt.Println("redis failed")
 		return nil, fmt.Errorf("redis stopped ")
@@ -70,4 +71,13 @@ func StartConsumer(rdb *redis.Client) (*models.Create, error) {
 
 	}
 
+}
+
+func PublishLog(rds *redis.Client, appName, message string) {
+
+	formattedMsg := fmt.Sprintf("[SYSTEM] %s", message)
+
+	rds.Publish(context.Background(), "logs:"+appName, formattedMsg)
+
+	log.Println(appName, ":", message)
 }

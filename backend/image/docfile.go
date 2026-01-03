@@ -1,13 +1,14 @@
 package image
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"os"
+	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -86,25 +87,33 @@ func JobRunner(client kubernetes.Interface, job *batchv1.Job) (*batchv1.Job, err
 
 }
 
-func LogsGiver(client kubernetes.Interface, jobname string, namespace string) error {
+func LogsGiver(client kubernetes.Interface, jobname string, namespace string, rds *redis.Client, appname string) {
 	ctx := context.Background()
+	channelName := "logs:" + appname
+
+	publish := func(msg string) {
+		if err := rds.Publish(ctx, channelName, msg).Err(); err != nil {
+			log.Printf("redis publish failed: %v", err)
+		}
+	}
+
+	publish(fmt.Sprintf("[SYSTEM] Waiting for build pod for job: %s...", jobname))
 
 	var podName string
-	fmt.Printf("Waiting for pod creation for job: %s...\n", jobname)
-
 	for {
 		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("job-name=%s", jobname),
 		})
 		if err != nil {
-			return fmt.Errorf("error listing pods: %v", err)
+			log.Printf("Error listing pods: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		if len(pods.Items) > 0 {
-
 			pod := pods.Items[0]
 
-			if pod.Status.Phase != corev1.PodPending {
+			if pod.Status.Phase != corev1.PodUnknown {
 				podName = pod.Name
 				break
 			}
@@ -112,38 +121,45 @@ func LogsGiver(client kubernetes.Interface, jobname string, namespace string) er
 		time.Sleep(1 * time.Second)
 	}
 
-	fmt.Printf("Found Pod: %s. Starting log stream...\n", podName)
+	publish(fmt.Sprintf("[SYSTEM] Found Pod: %s. preparing log stream...", podName))
 
 	containers := []string{"pullrepo", "cnd-binary", "notifier"}
 
 	for _, containerName := range containers {
-		fmt.Printf("\n--- [Logs: %s] ---\n", containerName)
 
 		for {
 			pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 			if err != nil {
-				log.Println("Error getting pod status:", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// Check status of InitContainers and Containers
+			if pod.Status.Phase == corev1.PodFailed {
+				publish(fmt.Sprintf("[SYSTEM] ❌ Pod failed before %s could start", containerName))
+				return
+			}
+
 			isReady := false
 
-			// Check Init Containers
 			for _, status := range pod.Status.InitContainerStatuses {
 				if status.Name == containerName {
-					// It's ready if it's Running or Terminated (finished)
+
 					if status.State.Running != nil || status.State.Terminated != nil {
 						isReady = true
 					}
-					// If it's Waiting with "ErrImagePull" or "CrashLoop", we should probably break/log
-					if status.State.Waiting != nil && status.State.Waiting.Reason == "ErrImagePull" {
-						return fmt.Errorf("container %s failed to pull image", containerName)
+
+					if status.State.Waiting != nil {
+
+						reason := status.State.Waiting.Reason
+						if reason != "" {
+							publish(fmt.Sprintf("[SYSTEM] ❌ %s failed: %s", containerName, reason))
+							return
+						}
+
 					}
 				}
 			}
-			// Check Main Containers (for 'notifier')
+
 			for _, status := range pod.Status.ContainerStatuses {
 				if status.Name == containerName {
 					if status.State.Running != nil || status.State.Terminated != nil {
@@ -156,43 +172,41 @@ func LogsGiver(client kubernetes.Interface, jobname string, namespace string) er
 				break
 			}
 
-			// If the previous container failed, this one will never start.
-			// You might want to add logic here to check if the Pod Failed.
-			if pod.Status.Phase == corev1.PodFailed {
-				return fmt.Errorf("pod failed before container %s could start", containerName)
-			}
-
 			time.Sleep(1 * time.Second)
 		}
 
-		// 4. STREAM
+		publish(fmt.Sprintf("[SYSTEM] --- Starting Step: %s ---", containerName))
+
 		req := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 			Container: containerName,
-			Follow:    true, // Follow until the container exits
+			Follow:    true,
 		})
 
 		stream, err := req.Stream(ctx)
 		if err != nil {
-			log.Printf("Error opening stream for %s: %v", containerName, err)
+
+			log.Printf("Warning: Could not open stream for %s (it might be done): %v", containerName, err)
 			continue
 		}
 
-		// Copy to stdout
-		_, err = io.Copy(os.Stdout, stream)
-		stream.Close() // Don't defer inside a loop, close explicitly
-		if err != nil {
-			log.Printf("Error reading logs from %s: %v", containerName, err)
+		scanner := bufio.NewScanner(stream)
+		scanner.Buffer(make([]byte, 1024), 1024*1024)
+
+		for scanner.Scan() {
+			logLine := scanner.Text()
+			formattedLog := fmt.Sprintf("[%s] %s", strings.ToUpper(containerName), logLine)
+			rds.Publish(ctx, channelName, formattedLog)
 		}
+		stream.Close()
 	}
 
-	fmt.Println("\n--- Build Job Finished ---")
-	return nil
+	publish("[SYSTEM] Build Job Logs Finished.")
 }
 
-func JobObject(giturl string, appName string, depid string, registry_url string) (*batchv1.Job, string) {
-	apptag := fmt.Sprintf("%s/%s:%s", registry_url, appName, depid)
-	image := fmt.Sprintf("%s:%s", appName, depid)
-	cacheTag := fmt.Sprintf("%s/%s:cache", registry_url, appName)
+func JobObject(giturl string, appname string, depid string, registry_url string) (*batchv1.Job, string) {
+	apptag := fmt.Sprintf("%s/%s:%s", registry_url, appname, depid)
+	image := fmt.Sprintf("%s:%s", appname, depid)
+	cacheTag := fmt.Sprintf("%s/%s:cache", registry_url, appname)
 	runImage := "paketobuildpacks/run-jammy-base:latest"
 
 	cnbCmd := fmt.Sprintf(
@@ -210,12 +224,12 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 
 	var payload = fmt.Sprintf(
 		`{"status":"ready","app":"%s","timestamp":%d}`,
-		appName,
+		appname,
 		time.Now().Unix())
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "build-" + appName + depid,
+			Name:      "build-" + appname + depid,
 			Namespace: "builder",
 		},
 		Spec: batchv1.JobSpec{
@@ -267,7 +281,7 @@ func JobObject(giturl string, appName string, depid string, registry_url string)
 						{
 							Name:    "notifier",
 							Image:   "redis:alpine",
-							Command: []string{"redis-cli", "-h", "redis.default.svc.cluster.local", "RPUSH", fmt.Sprintf("status:%s", appName), payload},
+							Command: []string{"redis-cli", "-h", "redis.default.svc.cluster.local", "RPUSH", fmt.Sprintf("status:%s", appname), payload},
 
 							VolumeMounts: []corev1.VolumeMount{
 								{

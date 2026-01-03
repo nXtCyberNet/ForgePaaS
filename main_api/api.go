@@ -2,51 +2,78 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
+	"log"
+	"math/big"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 )
 
-type create struct {
-	GitRepo string `json:"gitrepo"`
-	UserId  string `json:"userid"`
-}
-
-type delete struct {
-	DepId string `json:"depid"`
-}
-
-func Health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-	})
-}
-
-func NewRedis() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 var rdb = NewRedis()
+
+func NewRedis() *redis.Client {
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		log.Fatal("redis connection failed:", err)
+	}
+	return rdb
+}
+
+type create struct {
+	GitRepo string `json:"gitrepo"`
+	AppName string `json:"appname"`
+	UserId  string `json:"userid"`
+	DepID   string `json:"depid"`
+}
+
+type delete struct {
+	Appname string `json:"appname"`
+	UserId  string `json:"userid"`
+}
+
+func GenerateDepID() string {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	result := make([]byte, 8)
+	for i := range result {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			return ""
+		}
+		result[i] = chars[num.Int64()]
+	}
+	return "dep-" + string(result)
+}
+
+func Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
 
 func createe(c *gin.Context) {
 	var data create
 	queue := "create_queue"
 
 	if err := c.ShouldBindJSON(&data); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid json",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
-	if data.GitRepo == "" || data.UserId == "" {
+	if data.GitRepo == "" || data.UserId == "" || data.AppName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing fields"})
 		return
 	}
+
+	data.DepID = GenerateDepID()
+
 	payload, err := json.Marshal(data)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "marshal failed"})
@@ -55,13 +82,14 @@ func createe(c *gin.Context) {
 
 	err1 := rdb.LPush(context.Background(), queue, payload).Err()
 	if err1 != nil {
-		c.JSON(500, gin.H{"error": "redis error "})
+		c.JSON(500, gin.H{"error": "redis error"})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
+		"depid":  data.DepID,
 	})
-
 }
 
 func deletee(c *gin.Context) {
@@ -69,9 +97,11 @@ func deletee(c *gin.Context) {
 	queue := "delete_queue"
 
 	if err := c.ShouldBindJSON(&data); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid json",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+		return
+	}
+	if data.Appname == "" || data.UserId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing fields"})
 		return
 	}
 
@@ -81,27 +111,65 @@ func deletee(c *gin.Context) {
 		return
 	}
 
-	if data.DepId != "" {
+	err = rdb.LPush(context.Background(), queue, payload).Err()
+	if err != nil {
+		c.JSON(500, gin.H{"error": "redis error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
 
-		err := rdb.LPush(context.Background(), queue, payload).Err()
-		if err != nil {
-			c.JSON(500, gin.H{"error": "marshel failed"})
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-		})
-
+func streamLogs(c *gin.Context) {
+	appName := c.Query("app")
+	if appName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'app' query parameter"})
+		return
 	}
 
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Println("❌ WebSocket Upgrade Failed:", err)
+		return
+	}
+	defer ws.Close()
+
+	log.Printf("✅ Client connected via WebSocket for: %s", appName)
+
+	streamRedisToWebSocket(ws, rdb, appName)
+}
+
+func streamRedisToWebSocket(ws *websocket.Conn, rds *redis.Client, appName string) {
+	ctx := context.Background()
+	channelName := "logs:" + appName
+
+	pubsub := rds.Subscribe(ctx, channelName)
+	defer pubsub.Close()
+
+	if _, err := pubsub.Receive(ctx); err != nil {
+		log.Printf("❌ Redis Subscription failed for %s: %v", appName, err)
+		ws.WriteMessage(websocket.TextMessage, []byte("[SYSTEM] Error connecting to log source"))
+		return
+	}
+
+	ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("[SYSTEM] Connected to log stream for %s...", appName)))
+
+	ch := pubsub.Channel()
+	for msg := range ch {
+		err := ws.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+		if err != nil {
+			log.Printf("👋 Client disconnected from %s", appName)
+			return
+		}
+	}
 }
 
 func main() {
-	r := gin.New()
-	r.GET("/health", Health)
+	r := gin.Default()
 
+	r.GET("/health", Health)
 	r.POST("/create", createe)
 	r.POST("/delete", deletee)
+	r.GET("/logs", streamLogs)
 
 	r.Run(":8080")
-
 }

@@ -1,136 +1,197 @@
 # ForgePaaS 🚀
 
-A self-hosted, open-source **Platform-as-a-Service (PaaS)** inspired by Heroku.
+A self-hosted, open-source **Platform-as-a-Service (PaaS)** built on Kubernetes.
 
-ForgePaaS lets developers **build, deploy, run, and manage applications** using a CLI and API, backed by Kubernetes. The focus is **simplicity first**, scale later.
+ForgePaaS allows developers to **build, deploy, run, and manage applications** using a CLI and API.
+The focus is **developer simplicity first**, scale later.
 
 ---
 
 ## 🎯 Goals
 
-* Heroku-like developer experience
+* Simple developer experience
 * Fully self-hosted
 * Kubernetes-native runtime
-* CLI and API driven deployments
+* CLI + API driven workflows
 * Minimal, understandable architecture
 
 ---
 
-## 🧱 High-Level Architecture (Version 1)
+## 🧱 Architecture (Version 1)
 
-CLI
+> 📐 **Architecture Diagram**
+> ![Architecture](image/forgepass.jpg)
 
-↓API Server
 
-↓
-Redis (State + Message Queue)
 
-↓
-CNB Builder (Cloud Native Buildpacks)
-
-↓
-Local Docker Registry
-
-↓
-Kubernetes Controller
-
-↓Kubernetes Pods
-
-↓
-Reverse Proxy (Nginx / Traefik)
+```
+[ Developer ]
+      |
+      v
+[ Forge CLI ]
+      |
+      v
+[ API Server ]
+      |
+      v
+[ Redis (State + Queue) ]
+      |
+      v
+[ Build Worker (CNB) ]
+      |
+      v
+[ Local Docker Registry ]
+      |
+      v
+[ Kubernetes Controller ]
+      |
+      v
+[ Kubernetes Pods ]
+      |
+      v
+[ Reverse Proxy (Ingress) ]
+```
 
 ---
 
 ## 🧩 Core Components
 
-### 1️⃣ API Server
+### API Server
 
-**One line:** Central control plane that accepts CLI requests, manages app state, and triggers build/deploy workflows via Redis.
+**Role:** Central control plane for the platform.
 
----
+**Responsibilities:**
 
-### 2️⃣ Redis (Local Storage + Queue)
-
-**One line:** In-memory store used for app metadata, state tracking, and build/deploy job queues.
-
----
-
-### 3️⃣ CNB Builder (Cloud Native Buildpacks)
-
-**One line:** Builds OCI container images from source code using Cloud Native Buildpacks.
+* Accept CLI requests (deploy, status, logs)
+* Store application metadata in Redis
+* Enqueue build and deploy jobs
+* Coordinate internal services
 
 ---
 
-### 4️⃣ Local Docker Registry
+### Redis (State + Queue)
 
-**One line:** Stores built container images locally for fast and reliable Kubernetes pulls.
+**Role:** In-memory store and job queue.
 
----
+**Used for:**
 
-### 5️⃣ Kubernetes Controller
-
-**One line:** Watches deploy events and creates or updates Kubernetes resources for each app.
-
----
-
-### 6️⃣ Reverse Proxy (Nginx / Traefik)
-
-**One line:** Dynamically routes incoming traffic to the correct application pods using subdomains.
+* Application metadata
+* Build and deployment queues
+* Temporary platform state
 
 ---
 
-### 7️⃣ CLI Tool
+### Build Worker (Cloud Native Buildpacks)
 
-**Role:** Developer-facing interface
+**Role:** Builds OCI container images from source code.
+
+**Details:**
+
+* Pulls source repository
+* Runs CNB lifecycle (no Docker socket)
+* Produces OCI image
+* Pushes image to local registry
+
+---
+
+### Local Docker Registry
+
+**Role:** Internal container image storage.
+
+**Why local:**
+
+* No external dependency
+* Fast Kubernetes pulls
+* Full control over images
+
+---
+
+### Kubernetes Controller
+
+**Role:** Converts platform intent into Kubernetes resources.
+
+**Responsibilities:**
+
+* Create or update Deployments
+* Create Services
+* Apply resource limits
+* Handle redeployments
+
+---
+
+### Reverse Proxy (Ingress)
+
+**Role:** Routes external traffic to application pods.
+
+**Features:**
+
+* Subdomain-based routing
+* Dynamic configuration
+* Single entry point
+
+---
+
+### CLI Tool
+
+**Role:** Developer-facing interface.
 
 **Version 1 Commands:**
+
+```bash
 forge deploy
 forge status
 forge apps
 forge logs
+```
 
 **Responsibilities:**
 
-* Deploy applications
-* Show build and runtime status
-* Stream application logs
+* Trigger deployments
+* Show application status
+* List applications
+* Stream logs
 
 ---
 
-## 🔁 Deployment Flow (Version 1)
+## 🔁 Deployment Flow
 
+```text
 forge deploy
-↓
-API receives request
-↓
+   ↓
+API Server receives request
+   ↓
 Redis queues build job
-↓
-CNB builds image
-↓
+   ↓
+Build Worker runs CNB
+   ↓
 Image pushed to local registry
-↓
-Kubernetes controller deploys image
-↓
-Reverse proxy routes traffic
+   ↓
+Kubernetes Controller deploys app
+   ↓
+Reverse Proxy exposes app
+```
 
 ---
 
 ## 📦 Version 1 Scope (MVP)
 
+### Included
+
 * Application deployment
 * CNB-based image builds
 * Local Docker registry
-* Kubernetes-based runtime
+* Kubernetes runtime
 * Dynamic routing
 * CLI deploy and status
 * Basic log streaming
 
-**Not included in v1:**
+### Not Included
 
 * Authentication
 * Multi-tenant isolation
 * Autoscaling
 * Billing
+* Persistent storage
 
 ---
 
@@ -138,14 +199,14 @@ Reverse proxy routes traffic
 
 ### Security
 
-* CLI authentication (token-based)
+* Token-based CLI authentication
 * API authentication middleware
 * Role-based access control
 * Namespace isolation per user
 
 ### Observability
 
-* Live container log streaming via CLI
+* Live log streaming
 * Application metrics
 * Health checks
 
@@ -162,8 +223,8 @@ Reverse proxy routes traffic
 
 * Least privilege by default
 * No Docker socket exposure
-* Resource limits on all containers
-* Network isolation
+* Resource limits on all pods
+* Internal-only control plane
 
 ---
 
@@ -171,23 +232,20 @@ Reverse proxy routes traffic
 
 * Simple over complex
 * One responsibility per service
-* Kubernetes as the final runtime
-* Clear and observable systems
-* No magic, only explicit flows
+* Kubernetes as final runtime
+* Explicit and observable flows
+* Easy to debug and reason about
 
 ---
 
 ## 🚧 Project Status
 
-**Version:** 0.1 (Active Development)
+**Version:** `0.1`
+**State:** Active development
 
 ---
 
 ## 🤝 Contributing
 
-This project is built for learning and real-world use.
+ForgePaaS is built for learning and real-world experimentation.
 Contributions, reviews, and ideas are welcome.
-
----
-
-##

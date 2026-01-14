@@ -37,7 +37,7 @@ func CheckReady(rdb *redis.Client, appname string) ([]string, error) {
 
 }
 
-func StartConsumer(ctx context.Context, rdb *redis.Client) (*models.Create, error) {
+func StartConsumer(ctx context.Context, rdb *redis.Client) (*models.QueueResult, error) {
 	if test(rdb) != true {
 		fmt.Println("redis failed")
 		return nil, fmt.Errorf("redis stopped ")
@@ -49,6 +49,7 @@ func StartConsumer(ctx context.Context, rdb *redis.Client) (*models.Create, erro
 		}
 
 		var crr models.Create
+		var dell models.Delete
 
 		queue := msg[0]
 
@@ -58,14 +59,14 @@ func StartConsumer(ctx context.Context, rdb *redis.Client) (*models.Create, erro
 			if err != nil {
 				return nil, err
 			}
-			return &crr, nil
+			return &models.QueueResult{Queue: "create", Create: &crr}, nil
 
 		case "delete_queue":
-			err := json.Unmarshal([]byte(msg[1]), &crr)
+			err := json.Unmarshal([]byte(msg[1]), &dell)
 			if err != nil {
 				return nil, err
 			}
-			return &crr, nil
+			return &models.QueueResult{Queue: "delete", Delete: &dell}, nil
 
 		}
 

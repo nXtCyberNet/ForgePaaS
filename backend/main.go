@@ -50,12 +50,19 @@ func main() {
 			time.Sleep(2 * time.Second)
 			continue
 		}
+		if consumer.Queue == "create" {
+			log.Printf(" finded the payload appname : %s , depid %s , gitrepo : %s", consumer.Create.AppName, consumer.Create.DepId, consumer.Create.GitRepo)
 
-		log.Printf(" finded the payload appname : %s , depid %s , gitrepo : %s", consumer.AppName, consumer.DepId, consumer.GitRepo)
+			go DeploymentPipeline(dynclient, client, consumer.Create, rds)
 
-		log.Println(client)
+		} else if consumer.Queue == "delete" {
+			log.Printf("payload: %s , %s , force : %t", consumer.Delete.UserID, consumer.Delete.AppName, consumer.Delete.Force)
+			go deleteapp(dynclient, client, consumer.Delete, rds)
 
-		go DeploymentPipeline(dynclient, client, consumer, rds)
+		} else {
+
+		}
+
 	}
 }
 
@@ -106,8 +113,8 @@ func DeploymentPipeline(dynclient dynamic.Interface, client kubernetes.Interface
 
 	if msg["status"] == "ready" {
 		logsend("Build successful. Starting deployment...")
-		dep := create.CreateDep(apptag, consumer.DepId)
-		runn, err := create.DeplomentRunner(client, dep)
+		dep := create.CreateDep(apptag, consumer.DepId, consumer.AppName)
+		runn, err := create.DeplomentRunner(client, dep, consumer.AppName)
 
 		if err != nil {
 			logsend(fmt.Sprintf("❌ Deployment failed: %v", err))
@@ -138,4 +145,23 @@ func DeploymentPipeline(dynclient dynamic.Interface, client kubernetes.Interface
 
 	}
 
+}
+
+func deleteapp(dynclient dynamic.Interface, client kubernetes.Interface, consumer *models.Delete, rds *redis.Client) {
+	force := consumer.Force
+	appname := consumer.AppName
+
+	if force == true {
+		err := create.InstDelete(client, dynclient, appname, name, appname)
+		if err != nil {
+			log.Println(err)
+		}
+
+	} else {
+		err := create.Deletegracefully(client, dynclient, appname, name, appname)
+		if err != nil {
+			log.Println(err)
+		}
+
+	}
 }

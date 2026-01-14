@@ -7,10 +7,17 @@ type Create struct {
 }
 
 type Delete struct {
-	DepId string `json:"depid"`
+	UserID  string `json:"userId"`
+	AppName string `json:"appname"`
+	Force   bool   `json:"force"`
 }
 
 type Job struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+type QueueResult struct {
+	Queue  string
+	Create *Create
+	Delete *Delete
 }

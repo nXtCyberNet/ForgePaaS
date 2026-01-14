@@ -40,6 +40,7 @@ type create struct {
 type delete struct {
 	Appname string `json:"appname"`
 	UserId  string `json:"userid"`
+	Force   bool   `json:"force"`
 }
 
 func GenerateDepID() string {

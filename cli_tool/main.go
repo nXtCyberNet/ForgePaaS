@@ -26,8 +26,9 @@ type CreatePayload struct {
 }
 
 type DeletePayload struct {
-	UserID string `json:"userId"`
-	DepId  string `json:"depID"`
+	UserID  string `json:"userId"`
+	AppName string `json:"depID"`
+	Force   bool   `json:"force"`
 }
 
 type ConfigPayload struct {
@@ -74,10 +75,11 @@ func CreateResource(baseURL, userID, repo string, appname string) error {
 	return postJSON(url, payload)
 }
 
-func DeleteResource(baseURL, userID, depID string) error {
+func DeleteResource(baseURL, userID, appname string, force bool) error {
 	payload := DeletePayload{
-		UserID: userID,
-		DepId:  depID,
+		UserID:  userID,
+		AppName: appname,
+		Force:   force,
 	}
 	url := strings.TrimSuffix(baseURL, "/") + "/delete"
 	return postJSON(url, payload)
@@ -290,6 +292,7 @@ func HandleCreate(cfg ConfigPayload) {
 
 func HandleDelete(cfg ConfigPayload) {
 	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
+	force := deleteCmd.Bool("force", false, "Force delete (no graceful shutdown)")
 	app := deleteCmd.String("app", "", "App ID to delete")
 
 	deleteCmd.Parse(os.Args[2:])
@@ -302,7 +305,13 @@ func HandleDelete(cfg ConfigPayload) {
 
 	fmt.Printf("Deleting app: %s for user: %s...\n", *app, cfg.UserID)
 
-	err := DeleteResource(cfg.APIURL, cfg.UserID, *app)
+	if *force {
+		fmt.Println("⚠️ Force delete enabled: active connections may be dropped")
+	} else {
+		fmt.Println("Graceful delete: draining traffic before shutdown")
+	}
+
+	err := DeleteResource(cfg.APIURL, cfg.UserID, *app, *force)
 	if err != nil {
 		fmt.Println("Delete failed:", err)
 		return

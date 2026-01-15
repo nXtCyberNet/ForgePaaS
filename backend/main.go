@@ -152,13 +152,21 @@ func deleteapp(dynclient dynamic.Interface, client kubernetes.Interface, consume
 	appname := consumer.AppName
 
 	if force == true {
-		err := create.InstDelete(client, dynclient, appname, name, appname)
+		err := create.InstDelete(client, dynclient, appname, appname)
+		if err != nil {
+			log.Println(err)
+		}
+		err = create.DeleteNamespace(client, appname)
 		if err != nil {
 			log.Println(err)
 		}
 
 	} else {
-		err := create.Deletegracefully(client, dynclient, appname, name, appname)
+		err := create.Deletegracefully(client, dynclient, appname, appname)
+		if err != nil {
+			log.Println(err)
+		}
+		err = create.DeleteNamespace(client, appname)
 		if err != nil {
 			log.Println(err)
 		}

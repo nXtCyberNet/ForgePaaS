@@ -26,8 +26,8 @@ type CreatePayload struct {
 }
 
 type DeletePayload struct {
-	UserID  string `json:"userId"`
-	AppName string `json:"depID"`
+	UserId  string `json:"userid"`
+	AppName string `json:"appname"`
 	Force   bool   `json:"force"`
 }
 
@@ -77,7 +77,7 @@ func CreateResource(baseURL, userID, repo string, appname string) error {
 
 func DeleteResource(baseURL, userID, appname string, force bool) error {
 	payload := DeletePayload{
-		UserID:  userID,
+		UserId:  userID,
 		AppName: appname,
 		Force:   force,
 	}

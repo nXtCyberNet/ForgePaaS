@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	appv1 "k8s.io/api/apps/v1" //
+	appv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -15,6 +15,7 @@ import (
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,7 +29,7 @@ func int32Ptr(i int32) *int32 {
 func CreateDep(image_url string, depid string, appname string) *appv1.Deployment {
 	maxSurge := intstr.FromInt(1)
 	maxUnavailable := intstr.FromInt(0)
-	label := map[string]string{"app": depid}
+	label := map[string]string{"app": appname}
 	dep := &appv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appname,
@@ -102,6 +103,11 @@ func CreateService(client kubernetes.Interface, namespace string, appname string
 
 func DeplomentRunner(client kubernetes.Interface, dep *appv1.Deployment, appname string) (*appv1.Deployment, error) {
 
+	err := Createnamespace(client, appname)
+	if err != nil {
+		return nil, err
+	}
+
 	create, err := client.AppsV1().Deployments(appname).Create(context.Background(), dep, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
@@ -138,6 +144,10 @@ func InstDelete(client kubernetes.Interface, dynclient dynamic.Interface, namesp
 	errrr := dynclient.Resource(ingressRouteRes).Delete(context.Background(), route, metav1.DeleteOptions{})
 	if errrr != nil {
 		return errrr
+	}
+	err = DeleteNamespace(client, appname)
+	if err != nil {
+		return err
 	}
 	return nil
 
@@ -187,6 +197,10 @@ func Deletegracefully(client kubernetes.Interface, dynclient dynamic.Interface, 
 	if err != nil {
 		return err
 	}
+	err = DeleteNamespace(client, appname)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -209,7 +223,7 @@ func CreateRoute(client dynamic.Interface, appname string, domain string, namesp
 				"namespace": namespace,
 			},
 			"spec": map[string]interface{}{
-				// "entryPoints": []string{"web"},
+
 				"routes": []map[string]interface{}{
 					{
 						"match": fmt.Sprintf("Host(`%s`)", domain),
@@ -228,4 +242,47 @@ func CreateRoute(client dynamic.Interface, appname string, domain string, namesp
 
 	route, err := client.Resource(ingressRouteRes).Namespace(namespace).Create(context.TODO(), route, metav1.CreateOptions{})
 	return err
+}
+
+func Createnamespace(client kubernetes.Interface, appname string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: appname,
+		},
+	}
+
+	_, err := client.CoreV1().
+		Namespaces().
+		Create(ctx, ns, metav1.CreateOptions{})
+
+	// If namespace already exists, do NOT fail
+	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func DeleteNamespace(client kubernetes.Interface, appname string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := client.CoreV1().
+		Namespaces().
+		Delete(ctx, appname, metav1.DeleteOptions{})
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
 }

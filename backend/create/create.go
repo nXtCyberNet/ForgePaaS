@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/docker/docker/api/types/network"
 	appv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
-	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func int64Ptr(i int64) *int64 {
@@ -30,6 +31,7 @@ func CreateDep(image_url string, depid string, appname string) *appv1.Deployment
 	maxSurge := intstr.FromInt(1)
 	maxUnavailable := intstr.FromInt(0)
 	label := map[string]string{"app": appname}
+
 	dep := &appv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appname,
@@ -48,21 +50,42 @@ func CreateDep(image_url string, depid string, appname string) *appv1.Deployment
 					MaxUnavailable: &maxUnavailable,
 				},
 			},
-			Template: v1.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   appname,
 					Labels: label,
 				},
-				Spec: v1.PodSpec{
+				Spec: corev1.PodSpec{
 					TerminationGracePeriodSeconds: int64Ptr(120),
 
 					Containers: []corev1.Container{
 						{
 							Name:  "dep",
 							Image: image_url,
+
 							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: 8080,
+								},
+							},
+
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("125m"),
+									corev1.ResourceMemory: resource.MustParse("256Mi"),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("500m"),
+									corev1.ResourceMemory: resource.MustParse("500Mi"),
+								},
+							},
+
+							LivenessProbe: &corev1.Probe{
+								InitialDelaySeconds: 30,
+								PeriodSeconds:       10,
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(8080),
+									},
 								},
 							},
 						},
@@ -71,6 +94,7 @@ func CreateDep(image_url string, depid string, appname string) *appv1.Deployment
 			},
 		},
 	}
+
 	return dep
 }
 
@@ -285,4 +309,9 @@ func DeleteNamespace(client kubernetes.Interface, appname string) error {
 	}
 
 	return nil
+}
+
+func NetworkPolicies(client kubernetes.Interface , appname string ) {
+	client = client.NetworkingV1().NetworkPolicies(appname)
+
 }

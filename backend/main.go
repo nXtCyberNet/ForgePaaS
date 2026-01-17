@@ -19,7 +19,7 @@ import (
 )
 
 func LoadEnv() error {
-	return godotenv.Load("backend/.env")
+	return godotenv.Load(".env")
 }
 
 func main() {

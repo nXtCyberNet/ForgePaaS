@@ -17,12 +17,19 @@ The focus is **developer simplicity first**, scale later.
 
 ---
 
+## 👥 Who is ForgePaaS for?
+
+* DevOps engineers learning platform internals
+* Kubernetes-native backend developers
+* Students building real infrastructure projects
+* Teams wanting a simple self-hosted PaaS
+
+---
+
 ## 🧱 Architecture (Version 1)
 
 > 📐 **Architecture Diagram**
 > ![Architecture](image/forgepass.jpg)
-
-
 
 ```
 [ Developer ]
@@ -62,7 +69,7 @@ The focus is **developer simplicity first**, scale later.
 
 **Responsibilities:**
 
-* Accept CLI requests (deploy, status, logs)
+* Accept CLI requests (deploy, status, logs, delete)
 * Store application metadata in Redis
 * Enqueue build and deploy jobs
 * Coordinate internal services
@@ -116,6 +123,7 @@ The focus is **developer simplicity first**, scale later.
 * Create Services
 * Apply resource limits
 * Handle redeployments
+* Handle delete workflows
 
 ---
 
@@ -142,6 +150,7 @@ forge deploy
 forge status
 forge apps
 forge logs
+forge delete [--force]
 ```
 
 **Responsibilities:**
@@ -150,6 +159,7 @@ forge logs
 * Show application status
 * List applications
 * Stream logs
+* Delete applications
 
 ---
 
@@ -173,6 +183,132 @@ Reverse Proxy exposes app
 
 ---
 
+## ⚠️ Failure Handling (v1)
+
+* Build failures do not affect running apps
+* Failed builds are retriable
+* Partial deployments are cleaned automatically
+* Force delete can recover stuck resources
+
+---
+
+## 🚀 Getting Started (Startup Script)
+
+### Prerequisites
+
+* Linux host
+* Kubernetes cluster (k3s / kind / kubeadm)
+* kubectl configured
+* Docker installed
+
+### One-Command Startup
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/your-org/forgepaas/main/scripts/start.sh | bash
+```
+
+### What the startup script does
+
+* Creates `forge-system` namespace
+* Deploys Redis
+* Deploys local Docker registry
+* Deploys API server
+* Deploys build worker
+* Deploys controller
+* Deploys ingress / reverse proxy
+
+After completion, ForgePaaS control plane is ready.
+
+---
+
+## 🧱 Namespace Isolation Model
+
+ForgePaaS uses **namespace-level isolation**.
+
+### How it works
+
+* Platform components run in `forge-system`
+* One Kubernetes namespace per application
+
+Example:
+
+```bash
+forge deploy myapp
+```
+
+Creates:
+
+```text
+Namespace: forge-myapp
+```
+
+### Benefits
+
+* Strong resource isolation
+* Clear ownership boundaries
+* Easy cleanup
+* Native Kubernetes security model
+
+---
+
+## 🗑️ Delete, Cleanup & Teardown
+
+ForgePaaS supports **two deletion modes** depending on how safely or quickly you want to tear down an app.
+
+### Graceful Delete (default)
+
+```bash
+forge delete <app-name>
+```
+
+What happens:
+
+* Scales Deployment to zero
+* Waits for pod termination grace period
+* Drains connections via Ingress
+* Deletes Deployment and Service
+* Deletes application namespace
+
+Use this for **normal production-safe shutdowns**.
+
+---
+
+### Force Delete (immediate)
+
+```bash
+forge delete <app-name> --force
+```
+
+What happens:
+
+* Immediately deletes Deployment
+* Skips grace period
+* Force-deletes pods
+* Deletes Service and Ingress
+* Deletes application namespace
+
+⚠️ **WARNING**
+Force delete may drop in-flight requests.
+
+---
+
+### Full Platform Cleanup
+
+```bash
+scripts/cleanup.sh
+```
+
+This removes:
+
+* All ForgePaaS namespaces
+* Redis data
+* Local registry
+* Controller resources
+
+Use this for complete teardown or reinstallation.
+
+---
+
 ## 📦 Version 1 Scope (MVP)
 
 ### Included
@@ -184,13 +320,14 @@ Reverse Proxy exposes app
 * Dynamic routing
 * CLI deploy and status
 * Basic log streaming
+* Namespace-based isolation
+* Graceful & force deletion
 
 ### Not Included
 
 * Authentication
-* Multi-tenant isolation
+* Multi-tenant billing
 * Autoscaling
-* Billing
 * Persistent storage
 
 ---

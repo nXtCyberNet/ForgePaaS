@@ -204,7 +204,7 @@ Reverse Proxy exposes app
 ### One-Command Startup
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/forgepaas/main/scripts/start.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nXtCyberNet/ForgePaas/main/scripts/start.sh | bash
 ```
 
 ### What the startup script does

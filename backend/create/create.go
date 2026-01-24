@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/docker/docker/api/types/network"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
+
 	appv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	networkv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
@@ -311,7 +314,115 @@ func DeleteNamespace(client kubernetes.Interface, appname string) error {
 	return nil
 }
 
-func NetworkPolicies(client kubernetes.Interface , appname string ) {
-	client = client.NetworkingV1().NetworkPolicies(appname)
+func ptrProtocol(p string) *v1.Protocol {
+	proto := v1.Protocol(p)
+	return &proto
+}
+
+func NetworkPolicies(client kubernetes.Interface, appname string) error {
+	net := client.NetworkingV1().NetworkPolicies(appname)
+
+	policy := []*networkv1.NetworkPolicy{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-deny"},
+			Spec: networkv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{},
+				PolicyTypes: []networkv1.PolicyType{networkv1.PolicyTypeIngress, networkv1.PolicyTypeEgress},
+			},
+		},
+		{
+
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-ingress"},
+			Spec: networkv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{},
+				PolicyTypes: []networkv1.PolicyType{networkv1.PolicyTypeIngress},
+				Ingress: []networkv1.NetworkPolicyIngressRule{
+					{
+						From: []networkv1.NetworkPolicyPeer{
+							{
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "kube-system",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-dns"},
+			Spec: networkv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{},
+				PolicyTypes: []networkv1.PolicyType{
+					networkv1.PolicyTypeEgress,
+				},
+				Egress: []networkv1.NetworkPolicyEgressRule{
+					{
+						To: []networkv1.NetworkPolicyPeer{
+							{
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": "kube-system",
+									},
+								},
+							},
+						},
+						Ports: []networkv1.NetworkPolicyPort{
+							{
+								Protocol: ptrProtocol("UDP"),
+								Port:     &intstr.IntOrString{IntVal: 53},
+							},
+							{
+								Protocol: ptrProtocol("TCP"),
+								Port:     &intstr.IntOrString{IntVal: 53},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-internet"},
+			Spec: networkv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{},
+				PolicyTypes: []networkv1.PolicyType{networkv1.PolicyTypeEgress},
+				Egress: []networkv1.NetworkPolicyEgressRule{
+					{
+						To: []networkv1.NetworkPolicyPeer{
+							{
+								IPBlock: &networkv1.IPBlock{
+									CIDR: "0.0.0.0/0",
+									Except: []string{
+										"10.0.0.0/8",
+										"172.16.0.0/12",
+										"192.168.0.0/16",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, policy := range policy {
+		_, err := net.Get(context.Background(), policy.Name, metav1.GetOptions{})
+		if k8serr.IsNotFound(err) {
+			_, err = net.Create(context.Background(), policy, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create policy %s: %w", policy.Name, err)
+			}
+		} else {
+			_, err = net.Update(context.Background(), policy, metav1.UpdateOptions{})
+
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to create policy %s: %w", policy.Name, err)
+		}
+	}
+	return nil
 
 }

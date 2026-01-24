@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forge-paas-control
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: forge-paas-control
+data:
+  APP_ENV: "production"
+  APP_PORT: "8080"
+  REDIS_URL: "172.31.11.74:6379" # vm internal ip 
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: forge-paas-control
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: nxtcybernet127/forgepaas-api:latest
+        imagePullPolicy: Always
+
+        ports:
+        - containerPort: 8080
+
+        envFrom:
+        - configMapRef:
+            name: api-config
+
+        - secretRef:
+            name: api-secret
+    
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: forge-paas-control
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-secret
+  namespace: forge-paas-control
+type: Opaque
+stringData:
+  REDIS_PASS: "nothing"
+
+
+
+
+
+
+

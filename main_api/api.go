@@ -8,9 +8,12 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -20,13 +23,28 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-var rdb = NewRedis()
+func LoadEnv() error {
+	return godotenv.Load(".env")
+}
 
-func NewRedis() *redis.Client {
-	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+var rdb *redis.Client
+
+func NewRedis(ip string, pass string) *redis.Client {
+	rdb := redis.NewClient(&redis.Options{Addr: ip, Password: pass})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		log.Fatal("redis connection failed:", err)
+		log.Printf("⚠️ redis not ready yet: %v", err)
+
 	}
+	for i := 0; i < 10; i++ {
+		if err := rdb.Ping(context.Background()).Err(); err == nil {
+			log.Println("✅ redis connected")
+			return rdb
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	log.Println("⚠️ redis unavailable, continuing without it")
+
 	return rdb
 }
 
@@ -165,7 +183,12 @@ func streamRedisToWebSocket(ws *websocket.Conn, rds *redis.Client, appName strin
 }
 
 func main() {
+	rdb = NewRedis(
+		os.Getenv("REDIS_URL"),
+		os.Getenv("REDIS_PASS"),
+	)
 	r := gin.Default()
+	LoadEnv()
 
 	r.GET("/health", Health)
 	r.POST("/create", createe)
